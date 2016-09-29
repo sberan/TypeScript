@@ -2184,37 +2184,37 @@ namespace ts {
 
     export const enum SymbolFlags {
         None                    = 0,
-        FunctionScopedVariable  = 0x00000001,  // Variable (var) or parameter
-        BlockScopedVariable     = 0x00000002,  // A block-scoped variable (let or const)
-        Property                = 0x00000004,  // Property or enum member
-        EnumMember              = 0x00000008,  // Enum member
-        Function                = 0x00000010,  // Function
-        Class                   = 0x00000020,  // Class
-        Interface               = 0x00000040,  // Interface
-        ConstEnum               = 0x00000080,  // Const enum
-        RegularEnum             = 0x00000100,  // Enum
-        ValueModule             = 0x00000200,  // Instantiated module
-        NamespaceModule         = 0x00000400,  // Uninstantiated module
-        TypeLiteral             = 0x00000800,  // Type Literal
-        ObjectLiteral           = 0x00001000,  // Object Literal
-        Method                  = 0x00002000,  // Method
-        Constructor             = 0x00004000,  // Constructor
-        GetAccessor             = 0x00008000,  // Get accessor
-        SetAccessor             = 0x00010000,  // Set accessor
-        Signature               = 0x00020000,  // Call, construct, or index signature
-        TypeParameter           = 0x00040000,  // Type parameter
-        TypeAlias               = 0x00080000,  // Type alias
-        ExportValue             = 0x00100000,  // Exported value marker (see comment in declareModuleMember in binder)
-        ExportType              = 0x00200000,  // Exported type marker (see comment in declareModuleMember in binder)
-        ExportNamespace         = 0x00400000,  // Exported namespace marker (see comment in declareModuleMember in binder)
-        Alias                   = 0x00800000,  // An alias for another symbol (see comment in isAliasSymbolDeclaration in checker)
-        Instantiated            = 0x01000000,  // Instantiated symbol
-        Merged                  = 0x02000000,  // Merged symbol (created during program binding)
-        Transient               = 0x04000000,  // Transient symbol (created during type check)
-        Prototype               = 0x08000000,  // Prototype property (no source representation)
-        SyntheticProperty       = 0x10000000,  // Property in union or intersection type
-        Optional                = 0x20000000,  // Optional property
-        ExportStar              = 0x40000000,  // Export * declaration
+        FunctionScopedVariable  = 1 << 0,  // Variable (var) or parameter
+        BlockScopedVariable     = 1 << 1,  // A block-scoped variable (let or const)
+        Property                = 1 << 2,  // Property or enum member
+        EnumMember              = 1 << 3,  // Enum member
+        Function                = 1 << 4,  // Function
+        Class                   = 1 << 5,  // Class
+        Interface               = 1 << 6,  // Interface
+        ConstEnum               = 1 << 7,  // Const enum
+        RegularEnum             = 1 << 8,  // Enum
+        ValueModule             = 1 << 9,  // Instantiated module
+        NamespaceModule         = 1 << 10,  // Uninstantiated module
+        TypeLiteral             = 1 << 11,  // Type Literal
+        ObjectLiteral           = 1 << 12,  // Object Literal
+        Method                  = 1 << 13,  // Method
+        Constructor             = 1 << 14,  // Constructor
+        GetAccessor             = 1 << 15,  // Get accessor
+        SetAccessor             = 1 << 16,  // Set accessor
+        Signature               = 1 << 17,  // Call, construct, or index signature
+        TypeParameter           = 1 << 18,  // Type parameter
+        TypeAlias               = 1 << 19,  // Type alias
+        ExportValue             = 1 << 20,  // Exported value marker (see comment in declareModuleMember in binder)
+        ExportType              = 1 << 21,  // Exported type marker (see comment in declareModuleMember in binder)
+        ExportNamespace         = 1 << 22,  // Exported namespace marker (see comment in declareModuleMember in binder)
+        Alias                   = 1 << 23,  // An alias for another symbol (see comment in isAliasSymbolDeclaration in checker)
+        Instantiated            = 1 << 24,  // Instantiated symbol
+        Merged                  = 1 << 25,  // Merged symbol (created during program binding)
+        Transient               = 1 << 26,  // Transient symbol (created during type check)
+        Prototype               = 1 << 27,  // Prototype property (no source representation)
+        SyntheticProperty       = 1 << 28,  // Property in union or intersection type
+        Optional                = 1 << 29,  // Optional property
+        ExportStar              = 1 << 30,  // Export * declaration
 
         Enum = RegularEnum | ConstEnum,
         Variable = FunctionScopedVariable | BlockScopedVariable,
@@ -2529,9 +2529,8 @@ namespace ts {
 
     export interface IntersectionType extends TypeOperatorType { }
 
-    /* @internal */
     export interface SpreadType extends TypeOperatorType {
-        types: SpreadElementType[];       // Constituent types
+        types: SpreadElementType[];
     }
 
     /* @internal */

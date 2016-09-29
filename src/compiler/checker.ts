@@ -4319,21 +4319,6 @@ namespace ts {
             setObjectTypeMembers(type, emptySymbols, callSignatures, constructSignatures, stringIndexInfo, numberIndexInfo);
         }
 
-        function resolveSpreadTypeMembers(type: SpreadType) {
-            // The members and properties collections are empty for spread types. To get all properties of an
-            // spread type use getPropertiesOfType.
-            let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
-            let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
-            for (let i = type.types.length - 1; i > -1; i--) {
-                const t = type.types[i];
-                if (!t.isDeclaredProperty) {
-                    stringIndexInfo = unionIndexInfos(stringIndexInfo, getIndexInfoOfType(t, IndexKind.String));
-                    numberIndexInfo = unionIndexInfos(numberIndexInfo, getIndexInfoOfType(t, IndexKind.Number));
-                }
-            }
-            setObjectTypeMembers(type, emptySymbols, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
-        }
-
         function resolveAnonymousTypeMembers(type: AnonymousType) {
             const symbol = type.symbol;
             if (type.target) {
@@ -4344,7 +4329,87 @@ namespace ts {
                 const numberIndexInfo = instantiateIndexInfo(getIndexInfoOfType(type.target, IndexKind.Number), type.mapper);
                 setObjectTypeMembers(type, members, callSignatures, constructSignatures, stringIndexInfo, numberIndexInfo);
             }
+            else if (type.flags & TypeFlags.Spread) {
+                // TODO: a bunch of work here to resolve members AND their types
+                // (you can put off the type resolution until getTypeOfSymbol/getTypeOfVariableOrParmaeterOrProperty but I'm not sure there's any point)
+                let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
+                let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
+                for (let i = (symbol.valueDeclaration as ObjectLiteralExpression).properties.length - 1; i > -1; i--) {
+                    const prop = (symbol.valueDeclaration as ObjectLiteralExpression).properties[i];
+                    if (prop.kind === SyntaxKind.SpreadElementExpression) {
+                        const t = checkExpression((prop as SpreadElementExpression).expression);
+                        // check properties from t, etc
+                        stringIndexInfo = unionIndexInfos(stringIndexInfo, getIndexInfoOfType(t, IndexKind.String));
+                        numberIndexInfo = unionIndexInfos(numberIndexInfo, getIndexInfoOfType(t, IndexKind.Number));
+                    }
+                    else {
+                        // handle differently, but basically based on checkObjectLiteral
+                        // merged with createSpreadProperty
+                    }
+                }
+                // the properties part is basically already in getPropertiesOfSpreadType I think.
+                // (but not pre-organised into types)
+                const members = emptySymbols; // symbol.members;
+                setObjectTypeMembers(type, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
+
+
+
+                //let type: ObjectType;
+                /*
+                    let members: Map<Symbol>;
+                    const spreads: SpreadElementType[] = [];
+                    for (const member of (node as TypeLiteralNode).members) {
+                        if (member.kind === SyntaxKind.SpreadTypeElement) {
+                            if (members) {
+                                const t = createAnonymousType(undefined, members, emptyArray, emptyArray, undefined, undefined) as SpreadElementType;
+                                t.isDeclaredProperty = true;
+                                spreads.push(t);
+                                members = undefined;
+                            }
+                            spreads.push(getTypeFromTypeNode((member as SpreadTypeElement).type) as SpreadElementType);
+                        }
+                        else if (member.kind !== SyntaxKind.CallSignature &&
+                                 member.kind !== SyntaxKind.ConstructSignature &&
+                                 member.kind !== SyntaxKind.IndexSignature) {
+                            // note that spread types don't include call and construct signatures, and index signatures are resolved later
+                            const flags = SymbolFlags.Property | SymbolFlags.Transient | (member.questionToken ? SymbolFlags.Optional : 0);
+                            const text = getTextOfPropertyName(member.name);
+                            const symbol = <TransientSymbol>createSymbol(flags, text);
+                            symbol.declarations = [member];
+                            symbol.valueDeclaration = member;
+                            symbol.type = getTypeFromTypeNodeNoAlias((member as IndexSignatureDeclaration | PropertySignature | MethodSignature).type);
+                            if (!members) {
+                                members = createMap<Symbol>();
+                            }
+                            members[symbol.name] = symbol;
+                        }
+                    }
+                    if (members) {
+                        const t = createAnonymousType(undefined, members, emptyArray, emptyArray, undefined, undefined) as SpreadElementType;
+                        t.isDeclaredProperty = true;
+                        spreads.push(t);
+                    }
+                    return getSpreadType(spreads, node.symbol);
+*/
+            }
             else if (symbol.flags & SymbolFlags.TypeLiteral) {
+                for (const x in symbol.members) {
+                    if(symbol.members[x].valueDeclaration.kind === SyntaxKind.SpreadTypeElement) {
+                        type.flags |= TypeFlags.Spread;
+                        let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
+                        let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
+                        for (let i = (symbol.valueDeclaration as TypeLiteralNode).members.length - 1; i > -1; i--) {
+                            const prop = (symbol.valueDeclaration as TypeLiteralNode).members[i];
+                            if (prop.kind === SyntaxKind.SpreadTypeElement) {
+                                stringIndexInfo = unionIndexInfos(stringIndexInfo, getIndexInfoOfType(getTypeFromTypeNode((prop as SpreadTypeElement).type), IndexKind.String));
+                                numberIndexInfo = unionIndexInfos(numberIndexInfo, getIndexInfoOfType(getTypeFromTypeNode((prop as SpreadTypeElement).type), IndexKind.Number));
+                            }
+                        }
+                        const members = emptySymbols; // symbol.members;
+                        setObjectTypeMembers(type, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
+                        return;
+                    }
+                }
                 const members = symbol.members;
                 const callSignatures = getSignaturesOfSymbol(members["__call"]);
                 const constructSignatures = getSignaturesOfSymbol(members["__new"]);
@@ -4400,9 +4465,6 @@ namespace ts {
                 else if (type.flags & TypeFlags.Intersection) {
                     resolveIntersectionTypeMembers(<IntersectionType>type);
                 }
-                else if (type.flags & TypeFlags.Spread) {
-                    resolveSpreadTypeMembers(<SpreadType>type);
-                }
             }
             return <ResolvedType>type;
         }
@@ -4411,9 +4473,6 @@ namespace ts {
         function getPropertiesOfObjectType(type: Type): Symbol[] {
             if (type.flags & TypeFlags.ObjectType) {
                 return resolveStructuredTypeMembers(<ObjectType>type).properties;
-            }
-            if (type.flags & TypeFlags.Spread) {
-                return getPropertiesOfType(type);
             }
             return emptyArray;
         }
@@ -4459,7 +4518,7 @@ namespace ts {
 
         function getPropertiesOfType(type: Type): Symbol[] {
             type = getApparentType(type);
-            return type.flags & (TypeFlags.UnionOrIntersection | TypeFlags.Spread) ? getPropertiesOfUnionOrIntersectionOrSpreadType(<UnionType>type) :
+            return type.flags & TypeFlags.UnionOrIntersection ? getPropertiesOfUnionOrIntersectionOrSpreadType(<UnionType>type) :
                 getPropertiesOfObjectType(type);
         }
 
@@ -5729,48 +5788,7 @@ namespace ts {
         function getTypeFromTypeLiteralOrFunctionOrConstructorTypeNode(node: Node, aliasSymbol?: Symbol, aliasTypeArguments?: Type[]): Type {
             const links = getNodeLinks(node);
             if (!links.resolvedType) {
-                const isSpread = (node.kind === SyntaxKind.TypeLiteral &&
-                                  find((node as TypeLiteralNode).members, elt => elt.kind === SyntaxKind.SpreadTypeElement));
-                let type: ObjectType;
-                if (isSpread) {
-                    let members: Map<Symbol>;
-                    const spreads: SpreadElementType[] = [];
-                    for (const member of (node as TypeLiteralNode).members) {
-                        if (member.kind === SyntaxKind.SpreadTypeElement) {
-                            if (members) {
-                                const t = createAnonymousType(undefined, members, emptyArray, emptyArray, undefined, undefined) as SpreadElementType;
-                                t.isDeclaredProperty = true;
-                                spreads.push(t);
-                                members = undefined;
-                            }
-                            spreads.push(getTypeFromTypeNode((member as SpreadTypeElement).type) as SpreadElementType);
-                        }
-                        else if (member.kind !== SyntaxKind.CallSignature &&
-                                 member.kind !== SyntaxKind.ConstructSignature &&
-                                 member.kind !== SyntaxKind.IndexSignature) {
-                            // note that spread types don't include call and construct signatures, and index signatures are resolved later
-                            const flags = SymbolFlags.Property | SymbolFlags.Transient | (member.questionToken ? SymbolFlags.Optional : 0);
-                            const text = getTextOfPropertyName(member.name);
-                            const symbol = <TransientSymbol>createSymbol(flags, text);
-                            symbol.declarations = [member];
-                            symbol.valueDeclaration = member;
-                            symbol.type = getTypeFromTypeNodeNoAlias((member as IndexSignatureDeclaration | PropertySignature | MethodSignature).type);
-                            if (!members) {
-                                members = createMap<Symbol>();
-                            }
-                            members[symbol.name] = symbol;
-                        }
-                    }
-                    if (members) {
-                        const t = createAnonymousType(undefined, members, emptyArray, emptyArray, undefined, undefined) as SpreadElementType;
-                        t.isDeclaredProperty = true;
-                        spreads.push(t);
-                    }
-                    return getSpreadType(spreads, node.symbol);
-                }
-                else {
-                    type = createObjectType(TypeFlags.Anonymous, node.symbol);
-                }
+                const type = createObjectType(TypeFlags.Anonymous, node.symbol);
                 type.aliasSymbol = aliasSymbol;
                 type.aliasTypeArguments = aliasTypeArguments;
                 links.resolvedType = type;
@@ -10501,7 +10519,6 @@ namespace ts {
 
             let propertiesTable = createMap<Symbol>();
             let propertiesArray: Symbol[] = [];
-            const spreads: SpreadElementType[] = [];
             const contextualType = getApparentTypeOfContextualType(node);
             const contextualTypeHasPattern = contextualType && contextualType.pattern &&
                 (contextualType.pattern.kind === SyntaxKind.ObjectBindingPattern || contextualType.pattern.kind === SyntaxKind.ObjectLiteralExpression);
@@ -10509,6 +10526,7 @@ namespace ts {
             let patternWithComputedProperties = false;
             let hasComputedStringProperty = false;
             let hasComputedNumberProperty = false;
+            let hasSpread = false;
 
             for (const memberDecl of node.properties) {
                 let member = memberDecl.symbol;
@@ -10572,17 +10590,8 @@ namespace ts {
                     member = prop;
                 }
                 else if (memberDecl.kind === SyntaxKind.SpreadElementExpression) {
-                    if (propertiesArray.length > 0) {
-                        const t = createObjectLiteralType() as SpreadElementType;
-                        t.isDeclaredProperty = true;
-                        spreads.push(t);
-                        propertiesArray = [];
-                        propertiesTable = createMap<Symbol>();
-                        hasComputedStringProperty = false;
-                        hasComputedNumberProperty = false;
-                    }
-                    spreads.push(checkExpression((memberDecl as SpreadElementExpression).expression) as SpreadElementType);
-                    continue;
+                    hasSpread = true;
+                    member = createTransientSymbol(member, checkExpression((memberDecl as SpreadElementExpression).expression));
                 }
                 else {
                     // TypeScript 1.0 spec (April 2014)
@@ -10623,31 +10632,18 @@ namespace ts {
                 }
             }
 
-            if (spreads.length > 0) {
-                if (propertiesArray.length > 0) {
-                    const t = createObjectLiteralType() as SpreadElementType;
-                    t.isDeclaredProperty = true;
-                    spreads.push(t);
-                }
-                const propagatedFlags = getPropagatingFlagsOfTypes(spreads, /*excludeKinds*/ TypeFlags.Nullable);
-                const spread = getSpreadType(spreads, node.symbol);
-                spread.flags |= propagatedFlags;
-                return spread;
+            const stringIndexInfo = hasComputedStringProperty ? getObjectLiteralIndexInfo(node, propertiesArray, IndexKind.String) : undefined;
+            const numberIndexInfo = hasComputedNumberProperty ? getObjectLiteralIndexInfo(node, propertiesArray, IndexKind.Number) : undefined;
+            const result = createAnonymousType(node.symbol, propertiesTable, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
+            const freshObjectLiteralFlag = compilerOptions.suppressExcessPropertyErrors ? 0 : TypeFlags.FreshLiteral;
+            result.flags |= TypeFlags.ObjectLiteral | TypeFlags.ContainsObjectLiteral | freshObjectLiteralFlag |
+                (typeFlags & TypeFlags.PropagatingFlags) |
+                (patternWithComputedProperties ? TypeFlags.ObjectLiteralPatternWithComputedProperties : 0) |
+                (hasSpread ? TypeFlags.Spread : 0);
+            if (inDestructuringPattern) {
+                result.pattern = node;
             }
-
-            return createObjectLiteralType();
-            function createObjectLiteralType() {
-                const stringIndexInfo = hasComputedStringProperty ? getObjectLiteralIndexInfo(node, propertiesArray, IndexKind.String) : undefined;
-                const numberIndexInfo = hasComputedNumberProperty ? getObjectLiteralIndexInfo(node, propertiesArray, IndexKind.Number) : undefined;
-                const result = createAnonymousType(node.symbol, propertiesTable, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
-                const freshObjectLiteralFlag = compilerOptions.suppressExcessPropertyErrors ? 0 : TypeFlags.FreshLiteral;
-                result.flags |= TypeFlags.ObjectLiteral | TypeFlags.ContainsObjectLiteral | freshObjectLiteralFlag | (typeFlags & TypeFlags.PropagatingFlags) | (patternWithComputedProperties ? TypeFlags.ObjectLiteralPatternWithComputedProperties : 0);
-                if (inDestructuringPattern) {
-                    result.pattern = node;
-                }
-                return result;
-            }
-
+            return result;
        }
 
         function checkJsxSelfClosingElement(node: JsxSelfClosingElement) {
