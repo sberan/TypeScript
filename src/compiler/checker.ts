@@ -4319,6 +4319,21 @@ namespace ts {
             setObjectTypeMembers(type, emptySymbols, callSignatures, constructSignatures, stringIndexInfo, numberIndexInfo);
         }
 
+        function addSpreadProperty(property: Symbol, memberProperties: Map<Symbol[]>, isFromSpread: boolean) {
+            if (property.flags & SymbolFlags.Method && isFromSpread ||
+                property.flags & SymbolFlags.SetAccessor && !(property.flags & SymbolFlags.GetAccessor)) {
+                // skip methods and set-only properties
+                return;
+            }
+            const name = property.name; // if property.name doesn't work, fall back to: getTextOfPropertyName(node.name);
+            if (!(name in memberProperties)) {
+                memberProperties[name] = [property];
+            }
+            else if (!contains(memberProperties[name], property)) {
+                memberProperties[name].push(property);
+            }
+        }
+
         function resolveAnonymousTypeMembers(type: AnonymousType) {
             const symbol = type.symbol;
             if (type.target) {
@@ -4330,67 +4345,174 @@ namespace ts {
                 setObjectTypeMembers(type, members, callSignatures, constructSignatures, stringIndexInfo, numberIndexInfo);
             }
             else if (type.flags & TypeFlags.Spread) {
-                // TODO: a bunch of work here to resolve members AND their types
-                // (you can put off the type resolution until getTypeOfSymbol/getTypeOfVariableOrParmaeterOrProperty but I'm not sure there's any point)
-                let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
-                let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
-                for (let i = (symbol.valueDeclaration as ObjectLiteralExpression).properties.length - 1; i > -1; i--) {
-                    const prop = (symbol.valueDeclaration as ObjectLiteralExpression).properties[i];
-                    if (prop.kind === SyntaxKind.SpreadElementExpression) {
-                        const t = checkExpression((prop as SpreadElementExpression).expression);
-                        // check properties from t, etc
-                        stringIndexInfo = unionIndexInfos(stringIndexInfo, getIndexInfoOfType(t, IndexKind.String));
-                        numberIndexInfo = unionIndexInfos(numberIndexInfo, getIndexInfoOfType(t, IndexKind.Number));
+                if (symbol.valueDeclaration.kind === SyntaxKind.TypeLiteral) {
+                    // should be TypeLiteralNode
+                    // 1. Resolve included indexers
+                    let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
+                    let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
+                    const properties = (symbol.valueDeclaration as TypeLiteralNode).members;
+                    const members = createMap<Symbol>();
+                    const memberProperties = createMap<Symbol[]>();
+                    for (let i = properties.length - 1; i > -1; i--) {
+                        const node = (symbol.valueDeclaration as TypeLiteralNode).members[i];
+                        if (node.kind === SyntaxKind.SpreadTypeElement) {
+                            // 1. resolve indexers
+                            // TODO: Maybe wrap with getApparentType
+                            const t = getTypeOfSymbol(node.symbol); // might need to be getTypeFromTypeNode(node) ?
+                            stringIndexInfo = unionIndexInfos(stringIndexInfo, getIndexInfoOfType(t, IndexKind.String));
+                            numberIndexInfo = unionIndexInfos(numberIndexInfo, getIndexInfoOfType(t, IndexKind.Number));
+                            // 2. check properties from t using similar algorithm to the simple case
+                            // TODO: getPropertiesOfObjectType might suffice but it doesn't cover unions or intersections
+                            for (const property of getPropertiesOfType(t)) {
+                                addSpreadProperty(property, memberProperties, /*isFromSpread*/ true);
+                            }
+                        }
+                        else {
+                            addSpreadProperty(node.symbol, memberProperties, /*isFromSpread*/ false);
+                        }
                     }
-                    else {
-                        // handle differently, but basically based on checkObjectLiteral
-                        // merged with createSpreadProperty
+                    for (const name in memberProperties) {
+                        let isReadonly = false;
+                        let commonFlags = SymbolFlags.Optional;
+                        let tmp: Symbol[] = [];
+                        let len = 0;
+                        for (const property of memberProperties[name]) {
+                            if (isReadonlySymbol(property)) {
+                                isReadonly = true;
+                            }
+                            if (getDeclarationModifierFlagsFromSymbol(property) & (ModifierFlags.Private | ModifierFlags.Protected)) {
+                                // a trailing private makes the entire property disappear
+                                // TODO: Unions, intersections and spreads should really just keep ONLY the private symbol(s) and rely on other access control
+                                // but this currently only works if you don't have to union it.
+                                continue;
+                            }
+                            if (!(property.flags & SymbolFlags.Optional)) {
+                                // Reset extraFlags to None since we found a non-optional property
+                                commonFlags = SymbolFlags.None;
+                                continue;
+                            }
+                            tmp.push(property);
+                            len++;
+                        }
+                        if (len === 1) {
+                            members[name] = memberProperties[name][0];
+                        }
+                        else {
+                            const propTypes: Type[] = [];
+                            const declarations: Declaration[] = [];
+                            let commonType: Type = undefined;
+                            let hasNonUniformType = false;
+                            for (const property of memberProperties[name].slice(0, len)) {
+                                if (property.declarations) {
+                                    addRange(declarations, property.declarations);
+                                }
+                                const type = getTypeOfSymbol(property);
+                                if (!commonType) {
+                                    commonType = type;
+                                }
+                                else if (type !== commonType) {
+                                    hasNonUniformType = true;
+                                }
+                                propTypes.push(type);
+                            }
+                            const result = <TransientSymbol>createSymbol(SymbolFlags.Property | SymbolFlags.Transient | SymbolFlags.SyntheticProperty | commonFlags, name);
+                            result.hasNonUniformType = hasNonUniformType;
+                            result.isPartial = false;
+                            result.declarations = declarations;
+                            if (declarations.length) {
+                                result.valueDeclaration = declarations[0];
+                            }
+                            result.isReadonly = isReadonly;
+                            result.type = getUnionType(propTypes);
+                            members[name] = result;
+                        }
                     }
+                    setObjectTypeMembers(type, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
                 }
-                // the properties part is basically already in getPropertiesOfSpreadType I think.
-                // (but not pre-organised into types)
-                const members = emptySymbols; // symbol.members;
-                setObjectTypeMembers(type, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
-
-
-
-                //let type: ObjectType;
-                /*
-                    let members: Map<Symbol>;
-                    const spreads: SpreadElementType[] = [];
-                    for (const member of (node as TypeLiteralNode).members) {
-                        if (member.kind === SyntaxKind.SpreadTypeElement) {
-                            if (members) {
-                                const t = createAnonymousType(undefined, members, emptyArray, emptyArray, undefined, undefined) as SpreadElementType;
-                                t.isDeclaredProperty = true;
-                                spreads.push(t);
-                                members = undefined;
+                else {
+                    // should be ObjectLiteralExpression
+                    // 1. Resolve included indexers
+                    let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
+                    let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
+                    const properties = (symbol.valueDeclaration as ObjectLiteralExpression).properties;
+                    const members = createMap<Symbol>();
+                    const memberProperties = createMap<Symbol[]>();
+                    for (let i = properties.length - 1; i > -1; i--) {
+                        const node = (symbol.valueDeclaration as ObjectLiteralExpression).properties[i];
+                        if (node.kind === SyntaxKind.SpreadElementExpression) {
+                            // 1. resolve indexers
+                            // TODO: Maybe wrap with getApparentType
+                            const t = getTypeOfSymbol(node.symbol);
+                            stringIndexInfo = unionIndexInfos(stringIndexInfo, getIndexInfoOfType(t, IndexKind.String));
+                            numberIndexInfo = unionIndexInfos(numberIndexInfo, getIndexInfoOfType(t, IndexKind.Number));
+                            // 2. check properties from t using similar algorithm to the simple case
+                            // TODO: getPropertiesOfObjectType might suffice but it doesn't cover unions or intersections
+                            for (const property of getPropertiesOfType(t)) {
+                                addSpreadProperty(property, memberProperties, /*isFromSpread*/ true);
                             }
-                            spreads.push(getTypeFromTypeNode((member as SpreadTypeElement).type) as SpreadElementType);
                         }
-                        else if (member.kind !== SyntaxKind.CallSignature &&
-                                 member.kind !== SyntaxKind.ConstructSignature &&
-                                 member.kind !== SyntaxKind.IndexSignature) {
-                            // note that spread types don't include call and construct signatures, and index signatures are resolved later
-                            const flags = SymbolFlags.Property | SymbolFlags.Transient | (member.questionToken ? SymbolFlags.Optional : 0);
-                            const text = getTextOfPropertyName(member.name);
-                            const symbol = <TransientSymbol>createSymbol(flags, text);
-                            symbol.declarations = [member];
-                            symbol.valueDeclaration = member;
-                            symbol.type = getTypeFromTypeNodeNoAlias((member as IndexSignatureDeclaration | PropertySignature | MethodSignature).type);
-                            if (!members) {
-                                members = createMap<Symbol>();
-                            }
-                            members[symbol.name] = symbol;
+                        else {
+                            addSpreadProperty(node.symbol, memberProperties, /*isFromSpread*/ false);
                         }
                     }
-                    if (members) {
-                        const t = createAnonymousType(undefined, members, emptyArray, emptyArray, undefined, undefined) as SpreadElementType;
-                        t.isDeclaredProperty = true;
-                        spreads.push(t);
+                    for (const name in memberProperties) {
+                        let isReadonly = false;
+                        let commonFlags = SymbolFlags.Optional;
+                        let tmp: Symbol[] = [];
+                        let len = 0;
+                        for (const property of memberProperties[name]) {
+                            if (isReadonlySymbol(property)) {
+                                isReadonly = true;
+                            }
+                            if (getDeclarationModifierFlagsFromSymbol(property) & (ModifierFlags.Private | ModifierFlags.Protected)) {
+                                // a trailing private makes the entire property disappear
+                                // TODO: Unions, intersections and spreads should really just keep ONLY the private symbol(s) and rely on other access control
+                                // but this currently only works if you don't have to union it.
+                                continue;
+                            }
+                            if (!(property.flags & SymbolFlags.Optional)) {
+                                // Reset extraFlags to None since we found a non-optional property
+                                commonFlags = SymbolFlags.None;
+                                continue;
+                            }
+                            tmp.push(property);
+                            len++;
+                        }
+                        if (len === 1) {
+                            members[name] = memberProperties[name][0];
+                        }
+                        else {
+                            const propTypes: Type[] = [];
+                            const declarations: Declaration[] = [];
+                            let commonType: Type = undefined;
+                            let hasNonUniformType = false;
+                            for (const property of memberProperties[name].slice(0, len)) {
+                                if (property.declarations) {
+                                    addRange(declarations, property.declarations);
+                                }
+                                const type = getTypeOfSymbol(property);
+                                if (!commonType) {
+                                    commonType = type;
+                                }
+                                else if (type !== commonType) {
+                                    hasNonUniformType = true;
+                                }
+                                propTypes.push(type);
+                            }
+                            const result = <TransientSymbol>createSymbol(SymbolFlags.Property | SymbolFlags.Transient | SymbolFlags.SyntheticProperty | commonFlags, name);
+                            result.hasNonUniformType = hasNonUniformType;
+                            result.isPartial = false;
+                            result.declarations = declarations;
+                            if (declarations.length) {
+                                result.valueDeclaration = declarations[0];
+                            }
+                            result.isReadonly = isReadonly;
+                            result.type = getUnionType(propTypes);
+                            members[name] = result;
+                        }
                     }
-                    return getSpreadType(spreads, node.symbol);
-*/
+                    setObjectTypeMembers(type, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
+                }
             }
             else if (symbol.flags & SymbolFlags.TypeLiteral) {
                 for (const x in symbol.members) {
@@ -5792,6 +5914,9 @@ namespace ts {
                 type.aliasSymbol = aliasSymbol;
                 type.aliasTypeArguments = aliasTypeArguments;
                 links.resolvedType = type;
+                if (node.kind === SyntaxKind.TypeLiteral && find((node as TypeLiteralNode).members, n => n.kind === SyntaxKind.SpreadTypeElement)) {
+                    type.flags |= TypeFlags.Spread;
+                }
             }
             return links.resolvedType;
         }
