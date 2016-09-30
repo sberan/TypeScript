@@ -4345,16 +4345,17 @@ namespace ts {
                 setObjectTypeMembers(type, members, callSignatures, constructSignatures, stringIndexInfo, numberIndexInfo);
             }
             else if (type.flags & TypeFlags.Spread) {
-                if (symbol.valueDeclaration.kind === SyntaxKind.TypeLiteral) {
+                const typeLiteral = getDeclarationOfKind(symbol, SyntaxKind.TypeLiteral) as TypeLiteralNode;
+                if (typeLiteral) {
                     // should be TypeLiteralNode
                     // 1. Resolve included indexers
                     let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
                     let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
-                    const properties = (symbol.valueDeclaration as TypeLiteralNode).members;
+                    const properties = typeLiteral.members;
                     const members = createMap<Symbol>();
                     const memberProperties = createMap<Symbol[]>();
                     for (let i = properties.length - 1; i > -1; i--) {
-                        const node = (symbol.valueDeclaration as TypeLiteralNode).members[i];
+                        const node = typeLiteral.members[i];
                         if (node.kind === SyntaxKind.SpreadTypeElement) {
                             // 1. resolve indexers
                             // TODO: Maybe wrap with getApparentType
@@ -4434,7 +4435,7 @@ namespace ts {
                     // 1. Resolve included indexers
                     let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
                     let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
-                    const properties = (symbol.valueDeclaration as ObjectLiteralExpression).properties;
+                    const properties = (getDeclarationOfKind(symbol, SyntaxKind.ObjectLiteralExpression) as ObjectLiteralExpression).properties;
                     const members = createMap<Symbol>();
                     const memberProperties = createMap<Symbol[]>();
                     for (let i = properties.length - 1; i > -1; i--) {
@@ -4515,23 +4516,6 @@ namespace ts {
                 }
             }
             else if (symbol.flags & SymbolFlags.TypeLiteral) {
-                for (const x in symbol.members) {
-                    if(symbol.members[x].valueDeclaration.kind === SyntaxKind.SpreadTypeElement) {
-                        type.flags |= TypeFlags.Spread;
-                        let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
-                        let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
-                        for (let i = (symbol.valueDeclaration as TypeLiteralNode).members.length - 1; i > -1; i--) {
-                            const prop = (symbol.valueDeclaration as TypeLiteralNode).members[i];
-                            if (prop.kind === SyntaxKind.SpreadTypeElement) {
-                                stringIndexInfo = unionIndexInfos(stringIndexInfo, getIndexInfoOfType(getTypeFromTypeNode((prop as SpreadTypeElement).type), IndexKind.String));
-                                numberIndexInfo = unionIndexInfos(numberIndexInfo, getIndexInfoOfType(getTypeFromTypeNode((prop as SpreadTypeElement).type), IndexKind.Number));
-                            }
-                        }
-                        const members = emptySymbols; // symbol.members;
-                        setObjectTypeMembers(type, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
-                        return;
-                    }
-                }
                 const members = symbol.members;
                 const callSignatures = getSignaturesOfSymbol(members["__call"]);
                 const constructSignatures = getSignaturesOfSymbol(members["__new"]);
@@ -6878,40 +6862,39 @@ namespace ts {
                 }
 
                 if (source.flags & TypeFlags.Spread) {
-                    if (target.flags & TypeFlags.TypeParameter) {
-                        let hasTypeParameter = false;
-                        let typeParametersAreEqual = true;
-                        for (const t of (source as SpreadType).types) {
-                            if (t.flags & TypeFlags.TypeParameter) {
-                                hasTypeParameter = true;
-                                if (t !== target) {
-                                    typeParametersAreEqual = false;
-                                    break;
-                                }
+                    // check to see if source has type parameters.
+                    // if so, then target *also* must be a spread with (at least??) the same type parameters in the same order
+                    let sourceParameters: Symbol[];
+                    for (const name in source.symbol.members) {
+                        if (source.symbol.members[name].flags & SymbolFlags.TypeParameter) {
+                            if (sourceParameters) {
+                                sourceParameters.push(source.symbol.members[name]);
+                            }
+                            else {
+                                sourceParameters = [source.symbol.members[name]];
                             }
                         }
-                        if (hasTypeParameter && typeParametersAreEqual) {
-                            errorInfo = saveErrorInfo;
-                            return Ternary.True;
-                        }
                     }
-                    else if (target.flags & TypeFlags.Spread) {
-                        const sourceParameters = filter((source as SpreadType).types, t => !!(t.flags & TypeFlags.TypeParameter));
-                        const targetParameters = filter((target as SpreadType).types, t => !!(t.flags & TypeFlags.TypeParameter));
+                    if (sourceParameters) {
+                        if (!(target.flags & TypeFlags.Spread)) {
+                            return Ternary.False;
+                        }
+                        let targetParameters: Symbol[] = [];
+                        for (const name in target.symbol.members) {
+                            if (target.symbol.members[name].flags & SymbolFlags.TypeParameter) {
+                                targetParameters.push(target.symbol.members[name]);
+                            }
+                        }
                         if (sourceParameters.length !== targetParameters.length) {
+                            // TODO: Maybe should allow target to have more type parameters? This probably isn't sound though
                             reportRelationError(headMessage, source, target);
                             return Ternary.False;
                         }
                         for (let i = 0; i < sourceParameters.length; i++) {
-                            if (sourceParameters[i].symbol !== targetParameters[i].symbol) {
+                            if (sourceParameters[i] !== targetParameters[i]) {
                                 reportRelationError(headMessage, source, target);
                                 return Ternary.False;
                             }
-                        }
-                        const reportStructuralErrors = reportErrors && errorInfo === saveErrorInfo;
-                        if (result = objectTypeRelatedTo(source, source, target, reportStructuralErrors)) {
-                            errorInfo = saveErrorInfo;
-                            return result;
                         }
                     }
                 }

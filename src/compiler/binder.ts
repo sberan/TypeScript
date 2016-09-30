@@ -288,6 +288,14 @@ namespace ts {
             return node.name ? declarationNameToString(node.name) : getDeclarationName(node);
         }
 
+        function getNextSpreadName(symbolTable: SymbolTable): string {
+            let i = 0;
+            while(symbolTable["__spread" + i]) {
+                i++;
+            }
+            return "__spread" + i;
+        }
+
         /**
          * Declares a Symbol for the node and adds it to symbols. Reports errors for conflicting identifier names.
          * @param symbolTable - The symbol table which node will be added to.
@@ -302,7 +310,10 @@ namespace ts {
             const isDefaultExport = hasModifier(node, ModifierFlags.Default);
 
             // The exported symbol for an export default function/class node is always named "default"
-            const name = isDefaultExport && parent ? "default" : getDeclarationName(node);
+            // Spread elements don't have names, so are consecutively numbered
+            const name = isDefaultExport && parent ? "default" :
+                node.kind === SyntaxKind.SpreadElementExpression ? getNextSpreadName(symbolTable) :
+                getDeclarationName(node);
 
             let symbol: Symbol;
             if (name === undefined) {
@@ -1829,6 +1840,8 @@ namespace ts {
                     return bindPropertyOrMethodOrAccessor(<Declaration>node, SymbolFlags.EnumMember, SymbolFlags.EnumMemberExcludes);
 
                 case SyntaxKind.SpreadElementExpression:
+                    emitFlags |= NodeFlags.HasSpreadAttribute;
+                    return bindPropertyOrMethodOrAccessor(<Declaration>node, SymbolFlags.Property, SymbolFlags.PropertyExcludes);
                 case SyntaxKind.JsxSpreadAttribute:
                     emitFlags |= NodeFlags.HasSpreadAttribute;
                     return;
