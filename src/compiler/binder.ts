@@ -290,7 +290,7 @@ namespace ts {
 
         function getNextSpreadName(symbolTable: SymbolTable): string {
             let i = 0;
-            while(symbolTable["__spread" + i]) {
+            while (symbolTable["__spread" + i]) {
                 i++;
             }
             return "__spread" + i;
@@ -312,7 +312,7 @@ namespace ts {
             // The exported symbol for an export default function/class node is always named "default"
             // Spread elements don't have names, so are consecutively numbered
             const name = isDefaultExport && parent ? "default" :
-                node.kind === SyntaxKind.SpreadElementExpression ? getNextSpreadName(symbolTable) :
+                (node.kind === SyntaxKind.SpreadElementExpression || node.kind === SyntaxKind.SpreadTypeElement) ? getNextSpreadName(symbolTable) :
                 getDeclarationName(node);
 
             let symbol: Symbol;
@@ -1831,6 +1831,8 @@ namespace ts {
                 case SyntaxKind.PropertySignature:
                 case SyntaxKind.JSDocRecordMember:
                     return bindPropertyOrMethodOrAccessor(<Declaration>node, SymbolFlags.Property | ((<PropertyDeclaration>node).questionToken ? SymbolFlags.Optional : SymbolFlags.None), SymbolFlags.PropertyExcludes);
+                case SyntaxKind.SpreadTypeElement:
+                    return bindPropertyOrMethodOrAccessor(<Declaration>node, SymbolFlags.Property, SymbolFlags.PropertyExcludes);
                 case SyntaxKind.JSDocPropertyTag:
                     return bindJSDocProperty(<JSDocPropertyTag>node);
                 case SyntaxKind.PropertyAssignment:

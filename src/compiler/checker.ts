@@ -2192,9 +2192,6 @@ namespace ts {
                     else if (type.flags & TypeFlags.UnionOrIntersection) {
                         writeUnionOrIntersectionType(<TypeOperatorType>type, nextFlags);
                     }
-                    else if (type.flags & TypeFlags.Spread) {
-                        writeSpreadType(<SpreadType>type, nextFlags);
-                    }
                     else if (type.flags & TypeFlags.Anonymous) {
                         writeAnonymousType(<ObjectType>type, nextFlags);
                     }
@@ -2297,39 +2294,6 @@ namespace ts {
                     if (flags & TypeFormatFlags.InElementType) {
                         writePunctuation(writer, SyntaxKind.CloseParenToken);
                     }
-                }
-
-                function writeSpreadType(type: SpreadType, flags: TypeFormatFlags) {
-                    writePunctuation(writer, SyntaxKind.OpenBraceToken);
-                    writer.writeLine();
-                    writer.increaseIndent();
-                    let printFollowingPunctuation = false;
-                    for (const t of type.types) {
-                        if (printFollowingPunctuation) {
-                            writePunctuation(writer, SyntaxKind.SemicolonToken);
-                            writer.writeLine();
-                        }
-                        if (t.isDeclaredProperty) {
-                            const saveInObjectTypeLiteral = inObjectTypeLiteral;
-                            inObjectTypeLiteral = true;
-                            writeObjectLiteralType(resolveStructuredTypeMembers(t));
-                            printFollowingPunctuation = false;
-                            inObjectTypeLiteral = saveInObjectTypeLiteral;
-                        }
-                        else {
-                            writePunctuation(writer, SyntaxKind.DotDotDotToken);
-                            writeType(t, TypeFormatFlags.None);
-                            printFollowingPunctuation = true;
-                        }
-                    }
-                    const resolved = resolveStructuredTypeMembers(type);
-                    writeIndexSignature(resolved.stringIndexInfo, SyntaxKind.StringKeyword);
-                    writeIndexSignature(resolved.numberIndexInfo, SyntaxKind.NumberKeyword);
-                    writer.decreaseIndent();
-                    if (printFollowingPunctuation) {
-                        writeSpace(writer);
-                    }
-                    writePunctuation(writer, SyntaxKind.CloseBraceToken);
                 }
 
                 function writeAnonymousType(type: ObjectType, flags: TypeFormatFlags) {
@@ -2503,6 +2467,12 @@ namespace ts {
                                 writePunctuation(writer, SyntaxKind.SemicolonToken);
                                 writer.writeLine();
                             }
+                        }
+                        else if (t.flags & TypeFlags.Spread) {
+                            writePunctuation(writer, SyntaxKind.SemicolonToken);
+                            writeType(t, TypeFormatFlags.None);
+                            writePunctuation(writer, SyntaxKind.SemicolonToken);
+                            writer.writeLine();
                         }
                         else {
                             writePropertyWithModifiers(p);
@@ -4325,7 +4295,7 @@ namespace ts {
                 // skip methods and set-only properties
                 return;
             }
-            const name = property.name; // if property.name doesn't work, fall back to: getTextOfPropertyName(node.name);
+            const name = property.name;
             if (!(name in memberProperties)) {
                 memberProperties[name] = [property];
             }
@@ -4349,8 +4319,8 @@ namespace ts {
                 if (typeLiteral) {
                     // should be TypeLiteralNode
                     // 1. Resolve included indexers
-                    let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
-                    let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
+                    let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(symbol, IndexKind.String);
+                    let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(symbol, IndexKind.Number);
                     const properties = typeLiteral.members;
                     const members = createMap<Symbol>();
                     const memberProperties = createMap<Symbol[]>();
@@ -4359,7 +4329,7 @@ namespace ts {
                         if (node.kind === SyntaxKind.SpreadTypeElement) {
                             // 1. resolve indexers
                             // TODO: Maybe wrap with getApparentType
-                            const t = getTypeOfSymbol(node.symbol); // might need to be getTypeFromTypeNode(node) ?
+                            const t = getTypeOfSymbol(node.symbol);
                             stringIndexInfo = unionIndexInfos(stringIndexInfo, getIndexInfoOfType(t, IndexKind.String));
                             numberIndexInfo = unionIndexInfos(numberIndexInfo, getIndexInfoOfType(t, IndexKind.Number));
                             // 2. check properties from t using similar algorithm to the simple case
@@ -4368,14 +4338,15 @@ namespace ts {
                                 addSpreadProperty(property, memberProperties, /*isFromSpread*/ true);
                             }
                         }
-                        else {
+                        else if (node.kind !== SyntaxKind.CallSignature &&
+                                 node.kind !== SyntaxKind.ConstructSignature &&
+                                 node.kind !== SyntaxKind.IndexSignature) {
                             addSpreadProperty(node.symbol, memberProperties, /*isFromSpread*/ false);
                         }
                     }
                     for (const name in memberProperties) {
                         let isReadonly = false;
                         let commonFlags = SymbolFlags.Optional;
-                        let tmp: Symbol[] = [];
                         let len = 0;
                         for (const property of memberProperties[name]) {
                             if (isReadonlySymbol(property)) {
@@ -4387,13 +4358,12 @@ namespace ts {
                                 // but this currently only works if you don't have to union it.
                                 continue;
                             }
+                            len++;
                             if (!(property.flags & SymbolFlags.Optional)) {
                                 // Reset extraFlags to None since we found a non-optional property
                                 commonFlags = SymbolFlags.None;
-                                continue;
+                                break;
                             }
-                            tmp.push(property);
-                            len++;
                         }
                         if (len === 1) {
                             members[name] = memberProperties[name][0];
@@ -4459,7 +4429,6 @@ namespace ts {
                     for (const name in memberProperties) {
                         let isReadonly = false;
                         let commonFlags = SymbolFlags.Optional;
-                        let tmp: Symbol[] = [];
                         let len = 0;
                         for (const property of memberProperties[name]) {
                             if (isReadonlySymbol(property)) {
@@ -4471,13 +4440,12 @@ namespace ts {
                                 // but this currently only works if you don't have to union it.
                                 continue;
                             }
+                            len++;
                             if (!(property.flags & SymbolFlags.Optional)) {
                                 // Reset extraFlags to None since we found a non-optional property
                                 commonFlags = SymbolFlags.None;
-                                continue;
+                                break;
                             }
-                            tmp.push(property);
-                            len++;
                         }
                         if (len === 1) {
                             members[name] = memberProperties[name][0];
@@ -6879,7 +6847,7 @@ namespace ts {
                         if (!(target.flags & TypeFlags.Spread)) {
                             return Ternary.False;
                         }
-                        let targetParameters: Symbol[] = [];
+                        const targetParameters: Symbol[] = [];
                         for (const name in target.symbol.members) {
                             if (target.symbol.members[name].flags & SymbolFlags.TypeParameter) {
                                 targetParameters.push(target.symbol.members[name]);
@@ -10625,8 +10593,8 @@ namespace ts {
             // Grammar checking
             checkGrammarObjectLiteralExpression(node, inDestructuringPattern);
 
-            let propertiesTable = createMap<Symbol>();
-            let propertiesArray: Symbol[] = [];
+            const propertiesTable = createMap<Symbol>();
+            const propertiesArray: Symbol[] = [];
             const contextualType = getApparentTypeOfContextualType(node);
             const contextualTypeHasPattern = contextualType && contextualType.pattern &&
                 (contextualType.pattern.kind === SyntaxKind.ObjectBindingPattern || contextualType.pattern.kind === SyntaxKind.ObjectLiteralExpression);
