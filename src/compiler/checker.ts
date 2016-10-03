@@ -3136,6 +3136,7 @@ namespace ts {
             }
 
             // If it is a short-hand property assignment, use the type of the identifier
+            // TODO: Move this up out of VariableLikeDeclaration since ShorthandPropertyAssignment is not a VariableLikeDeclaration
             if (declaration.kind === SyntaxKind.ShorthandPropertyAssignment) {
                 return checkIdentifier(<Identifier>declaration.name);
             }
@@ -3281,6 +3282,9 @@ namespace ts {
                 // Handle export default expressions
                 if (declaration.kind === SyntaxKind.ExportAssignment) {
                     return links.type = checkExpression((<ExportAssignment>declaration).expression);
+                }
+                if (declaration.kind === SyntaxKind.SpreadElementExpression) {
+                    return links.type = checkExpression((declaration as SpreadElementExpression).expression);
                 }
                 if (declaration.flags & NodeFlags.JavaScriptFile && declaration.kind === SyntaxKind.JSDocPropertyTag && (<JSDocPropertyTag>declaration).typeExpression) {
                     return links.type = getTypeFromTypeNode((<JSDocPropertyTag>declaration).typeExpression.type);
@@ -4306,18 +4310,9 @@ namespace ts {
 
         function resolveAnonymousTypeMembers(type: AnonymousType) {
             const symbol = type.symbol;
-            if (type.target) {
-                const members = createInstantiatedSymbolTable(getPropertiesOfObjectType(type.target), type.mapper, /*mappingThisOnly*/ false);
-                const callSignatures = instantiateList(getSignaturesOfType(type.target, SignatureKind.Call), type.mapper, instantiateSignature);
-                const constructSignatures = instantiateList(getSignaturesOfType(type.target, SignatureKind.Construct), type.mapper, instantiateSignature);
-                const stringIndexInfo = instantiateIndexInfo(getIndexInfoOfType(type.target, IndexKind.String), type.mapper);
-                const numberIndexInfo = instantiateIndexInfo(getIndexInfoOfType(type.target, IndexKind.Number), type.mapper);
-                setObjectTypeMembers(type, members, callSignatures, constructSignatures, stringIndexInfo, numberIndexInfo);
-            }
-            else if (type.flags & TypeFlags.Spread) {
-                const typeLiteral = getDeclarationOfKind(symbol, SyntaxKind.TypeLiteral) as TypeLiteralNode;
-                if (typeLiteral) {
-                    // should be TypeLiteralNode
+            if (type.flags & TypeFlags.Spread) {
+                if (symbol.flags & SymbolFlags.TypeLiteral) {
+                    const typeLiteral = getDeclarationOfKind(symbol, SyntaxKind.TypeLiteral) as TypeLiteralNode;
                     // 1. Resolve included indexers
                     let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(symbol, IndexKind.String);
                     let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(symbol, IndexKind.Number);
@@ -4403,13 +4398,14 @@ namespace ts {
                 else {
                     // should be ObjectLiteralExpression
                     // 1. Resolve included indexers
-                    let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.String);
-                    let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(type.symbol, IndexKind.Number);
-                    const properties = (getDeclarationOfKind(symbol, SyntaxKind.ObjectLiteralExpression) as ObjectLiteralExpression).properties;
+                    let stringIndexInfo: IndexInfo = getIndexInfoOfSymbol(symbol, IndexKind.String);
+                    let numberIndexInfo: IndexInfo = getIndexInfoOfSymbol(symbol, IndexKind.Number);
+                    const declaration = getDeclarationOfKind(symbol, SyntaxKind.ObjectLiteralExpression) as ObjectLiteralExpression;
+                    Debug.assert(!!declaration, "couldn't find object literal expression declaration");
                     const members = createMap<Symbol>();
                     const memberProperties = createMap<Symbol[]>();
-                    for (let i = properties.length - 1; i > -1; i--) {
-                        const node = (symbol.valueDeclaration as ObjectLiteralExpression).properties[i];
+                    for (let i = declaration.properties.length - 1; i > -1; i--) {
+                        const node = declaration.properties[i];
                         if (node.kind === SyntaxKind.SpreadElementExpression) {
                             // 1. resolve indexers
                             // TODO: Maybe wrap with getApparentType
@@ -4482,6 +4478,14 @@ namespace ts {
                     }
                     setObjectTypeMembers(type, members, emptyArray, emptyArray, stringIndexInfo, numberIndexInfo);
                 }
+            }
+            else if (type.target) {
+                const members = createInstantiatedSymbolTable(getPropertiesOfObjectType(type.target), type.mapper, /*mappingThisOnly*/ false);
+                const callSignatures = instantiateList(getSignaturesOfType(type.target, SignatureKind.Call), type.mapper, instantiateSignature);
+                const constructSignatures = instantiateList(getSignaturesOfType(type.target, SignatureKind.Construct), type.mapper, instantiateSignature);
+                const stringIndexInfo = instantiateIndexInfo(getIndexInfoOfType(type.target, IndexKind.String), type.mapper);
+                const numberIndexInfo = instantiateIndexInfo(getIndexInfoOfType(type.target, IndexKind.Number), type.mapper);
+                setObjectTypeMembers(type, members, callSignatures, constructSignatures, stringIndexInfo, numberIndexInfo);
             }
             else if (symbol.flags & SymbolFlags.TypeLiteral) {
                 const members = symbol.members;
@@ -10666,6 +10670,8 @@ namespace ts {
                     member = prop;
                 }
                 else if (memberDecl.kind === SyntaxKind.SpreadElementExpression) {
+                    // TODO: Check whether checkExpression returns a TypeParameter and if not, just put the symbols in the member list *right now*
+                    // (and don't set hasSpread)
                     hasSpread = true;
                     member = createTransientSymbol(member, checkExpression((memberDecl as SpreadElementExpression).expression));
                 }
@@ -10718,6 +10724,13 @@ namespace ts {
                 (hasSpread ? TypeFlags.Spread : 0);
             if (inDestructuringPattern) {
                 result.pattern = node;
+            }
+            if (hasSpread) {
+                // I hope this creates wrapper with no members and flags including Spread
+                const wrapper = createObjectType(result.flags | TypeFlags.Spread, node.symbol) as AnonymousType;
+                wrapper.target = result;
+                wrapper.mapper = undefined;
+                return wrapper;
             }
             return result;
        }
