@@ -502,6 +502,7 @@ namespace ts {
             }
         }
 
+        //relevant?
         public readDirectory(rootDir: string, extensions: string[], exclude: string[], include: string[], depth?: number): string[] {
             // Wrap the API changes for 2.0 release. This try/catch
             // should be removed once TypeScript 2.0 has shipped.

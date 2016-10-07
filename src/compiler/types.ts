@@ -3073,6 +3073,8 @@ namespace ts {
         Pretty,
     }
 
+    //relevant?
+    //yes, relevant! this is *either* a parsed command line, *or* a parsed config file!
     export interface ParsedCommandLine {
         options: CompilerOptions;
         typingOptions?: TypingOptions;
