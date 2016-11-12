@@ -935,7 +935,7 @@ namespace ts {
                         case SyntaxKind.FunctionDeclaration:
                         case SyntaxKind.VariableDeclaration:
                             // type annotation
-                            if ((<FunctionLikeDeclaration | VariableDeclaration | ParameterDeclaration | PropertyDeclaration>parent).type === node) {
+                            if ((<FunctionLikeDeclaration | VariableDeclaration | ParameterDeclaration | PropertyDeclaration>parent).type === node && !options.allowTypesInJsFiles) {
                                 diagnostics.push(createDiagnosticForNode(node, Diagnostics.types_can_only_be_used_in_a_ts_file));
                                 return;
                             }

@@ -3143,6 +3143,7 @@ namespace ts {
         allowUnreachableCode?: boolean;
         allowUnusedLabels?: boolean;
         alwaysStrict?: boolean;
+        allowTypesInJsFiles?: boolean;
         baseUrl?: string;
         charset?: string;
         /* @internal */ configFilePath?: string;

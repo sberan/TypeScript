@@ -140,6 +140,11 @@ namespace ts {
             type: "boolean"
         },
         {
+            name: "allowTypesInJsFiles",
+            type: "boolean",
+            experimental: true
+        },
+        {
             name: "noImplicitAny",
             type: "boolean",
             description: Diagnostics.Raise_error_on_expressions_and_declarations_with_an_implied_any_type,
