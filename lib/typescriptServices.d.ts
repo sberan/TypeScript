@@ -1924,6 +1924,7 @@ declare namespace ts {
         allowUnreachableCode?: boolean;
         allowUnusedLabels?: boolean;
         alwaysStrict?: boolean;
+        allowTypesInJsFiles?: boolean;
         baseUrl?: string;
         charset?: string;
         declaration?: boolean;
